@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Números WhatsApp</title>
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: white; padding: 25px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .header h1 { color: #2d3748; font-size: 28px; }
+        .header h1 i { color: #25D366; margin-right: 10px; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 25px; }
+        .stat-card { background: white; padding: 25px; border-radius: 12px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .stat-number { font-size: 32px; font-weight: bold; color: #4a5568; margin-bottom: 5px; }
+        .stat-label { color: #718096; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        .controls { background: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s; }
+        .btn-primary { background: #4299e1; color: white; }
+        .btn-primary:hover { background: #3182ce; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-danger { background: #f56565; color: white; }
+        .btn-active { background: #2d3748; color: white; }
+        .search-box { flex: 1; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 16px; }
+        table { width: 100%; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.1); border-collapse: collapse; }
+        th { background: #f7fafc; padding: 18px 15px; text-align: left; color: #4a5568; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
+        td { padding: 18px 15px; border-bottom: 1px solid #edf2f7; color: #2d3748; }
+        tr:hover { background: #f8fafc; }
+        .whatsapp-number { font-weight: 600; color: #2b6cb0; font-size: 18px; }
+        .status { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .status-pending { background: #feebc8; color: #c05621; }
+        .status-sent { background: #c6f6d5; color: #276749; }
+        .btn-small { padding: 6px 12px; font-size: 14px; margin-right: 5px; border-radius: 6px; }
+        .loading { text-align: center; padding: 60px; color: #718096; }
+        .loading-spinner { border: 4px solid #e2e8f0; border-top: 4px solid #4299e1; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .no-data { text-align: center; padding: 60px; color: #718096; }
+        .no-data i { font-size: 60px; margin-bottom: 20px; opacity: 0.5; }
+        .timestamp { color: #718096; font-size: 13px; }
+        @media (max-width: 768px) { .stats { grid-template-columns: 1fr; } .controls { flex-direction: column; } .search-box { width: 100%; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fab fa-whatsapp"></i> Painel Admin Predictor</h1>
+            <p>Monitoramento em tempo real dos números WhatsApp</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="totalNumbers">0</div>
+                <div class="stat-label">Total de Números</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="pendingNumbers">0</div>
+                <div class="stat-label">Pendentes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="sentNumbers">0</div>
+                <div class="stat-label">Enviados</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-active" onclick="filterData('all')">Todos</button>
+            <button class="btn btn-primary" onclick="filterData('pending')">Pendentes</button>
+            <button class="btn btn-primary" onclick="filterData('sent')">Enviados</button>
+            <input type="text" class="search-box" id="searchInput" placeholder="Buscar por número (ex: 84xxxxxxx)" onkeyup="searchNumbers()">
+            <button class="btn btn-success" onclick="exportData()"><i class="fas fa-download"></i> Exportar CSV</button>
+            <button class="btn btn-primary" onclick="refreshData()"><i class="fas fa-sync-alt"></i> Atualizar</button>
+        </div>
+        
+        <div id="loading" class="loading">
+            <div class="loading-spinner"></div>
+            <p>Carregando dados do Firebase...</p>
+        </div>
+        
+        <div id="noData" class="no-data" style="display: none;">
+            <i class="fas fa-database"></i>
+            <h3>Nenhum número encontrado</h3>
+            <p>Aguardando registros de WhatsApp...</p>
+        </div>
+        
+        <table id="dataTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Número WhatsApp</th>
+                    <th>Status</th>
+                    <th>Data/Hora de Registro</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- Dados serão carregados aqui -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO DO FIREBASE (USE SUAS CREDENCIAIS)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDbPB6XBF3J1VY0X0ZQj2SKu8",
+            authDomain: "whatsapp-24492.firebaseapp.com",
+            projectId: "whatsapp-24492",
+            storageBucket: "whatsapp-24492.appspot.com",
+            messagingSenderId: "5299709394245",
+            appId: "1:5299709394245:web:7d46554&c2e",
+            measurementId: "G-FAKLLOK27H"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        let allNumbers = [];
+        let currentFilter = 'all';
+        let currentSearch = '';
+
+        // Carregar dados quando a página abrir
+        document.addEventListener('DOMContentLoaded', loadData);
+
+        function loadData() {
+            showLoading(true);
+            
+            db.collection('whatsapp_numbers')
+                .orderBy('timestamp', 'desc')
+                .onSnapshot((snapshot) => {
+                    allNumbers = [];
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        data.id = doc.id;
+                        allNumbers.push(data);
+                    });
+                    
+                    updateStats();
+                    applyFilters();
+                    showLoading(false);
+                }, (error) => {
+                    console.error('Erro ao carregar:', error);
+                    showLoading(false);
+                    showNoData(true, 'Erro ao conectar ao Firebase');
+                });
+        }
+
+        function updateStats() {
+            const total = allNumbers.length;
+            const pending = allNumbers.filter(n => n.status === 'pending').length;
+            const sent = allNumbers.filter(n => n.status === 'sent').length;
+            
+            document.getElementById('totalNumbers').textContent = total;
+            document.getElementById('pendingNumbers').textContent = pending;
+            document.getElementById('sentNumbers').textContent = sent;
+        }
+
+        function applyFilters() {
+            let filtered = [...allNumbers];
+            
+            // Aplicar filtro de status
+            if (currentFilter !== 'all') {
+                filtered = filtered.filter(n => n.status === currentFilter);
+            }
+            
+            // Aplicar busca
+            if (currentSearch) {
+                filtered = filtered.filter(n => 
+                    n.phoneNumber.includes(currentSearch)
+                );
+            }
+            
+            renderTable(filtered);
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            if (data.length === 0) {
+                showNoData(true, 'Nenhum número encontrado com esses filtros');
+                return;
+            }
+            
+            showNoData(false);
+            
+            data.forEach((item) => {
+                const date = item.timestamp.toDate();
+                const formattedDate = date.toLocaleDateString('pt-PT');
+                const formattedTime = date.toLocaleTimeString('pt-PT');
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>
+                        <div class="whatsapp-number">${item.phoneNumber}</div>
+                        <small class="timestamp">ID: ${item.id.substring(0, 8)}...</small>
+                    </td>
+                    <td>
+                        <span class="status status-${item.status}">
+                            ${item.status === 'pending' ? 'PENDENTE' : 'ENVIADO'}
+                        </span>
+                    </td>
+                    <td>
+                        <div>${formattedDate}</div>
+                        <small class="timestamp">${formattedTime}</small>
+                    </td>
+                    <td>
+                        <button class="btn btn-primary btn-small" onclick="openWhatsApp('${item.phoneNumber}')">
+                            <i class="fab fa-whatsapp"></i> WhatsApp
+                        </button>
+                        ${item.status === 'pending' ? 
+                            `<button class="btn btn-success btn-small" onclick="markAsSent('${item.id}')">
+                                <i class="fas fa-check"></i> Marcar Enviado
+                            </button>` : ''
+                        }
+                        <button class="btn btn-danger btn-small" onclick="deleteNumber('${item.id}')">
+                            <i class="fas fa-trash"></i> Excluir
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function filterData(filter) {
+            currentFilter = filter;
+            
+            // Atualizar botões ativos
+            document.querySelectorAll('.controls .btn').forEach(btn => {
+                btn.classList.remove('btn-active');
+                btn.classList.add('btn-primary');
+            });
+            event.target.classList.add('btn-active');
+            event.target.classList.remove('btn-primary');
+            
+            applyFilters();
+        }
+
+        function searchNumbers() {
+            currentSearch = document.getElementById('searchInput').value;
+            applyFilters();
+        }
+
+        function openWhatsApp(number) {
+            window.open(`https://wa.me/258${number}`, '_blank');
+        }
+
+        function markAsSent(id) {
+            if (confirm('Marcar este número como código enviado?')) {
+                db.collection('whatsapp_numbers').doc(id).update({
+                    status: 'sent',
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                })
+                .then(() => {
+                    alert('✅ Status atualizado para ENVIADO!');
+                })
+                .catch(error => {
+                    alert('❌ Erro ao atualizar status');
+                    console.error(error);
+                });
+            }
+        }
+
+        function deleteNumber(id) {
+            if (confirm('⚠️ Excluir permanentemente este número?')) {
+                db.collection('whatsapp_numbers').doc(id).delete()
+                .then(() => {
+                    alert('🗑️ Número excluído com sucesso!');
+                })
+                .catch(error => {
+                    alert('❌ Erro ao excluir número');
+                    console.error(error);
+                });
+            }
+        }
+
+        function exportData() {
+            const csv = allNumbers.map(item => {
+                const date = item.timestamp.toDate().toLocaleString('pt-PT');
+                return `${item.phoneNumber},${item.status},${date},${item.amount || '659 MT'}`;
+            }).join('\n');
+            
+            const blob = new Blob(['Número,Status,Data/Hora,Valor\n' + csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `numeros-predictor-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            
+            alert('📥 CSV exportado com sucesso!');
+        }
+
+        function refreshData() {
+            loadData();
+            alert('🔄 Dados atualizados!');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('dataTable').style.display = show ? 'none' : 'table';
+        }
+
+        function showNoData(show, message = 'Nenhum número encontrado') {
+            const noData = document.getElementById('noData');
+            noData.style.display = show ? 'block' : 'none';
+            noData.querySelector('h3').textContent = message;
+        }
+    </script>
+</body>
+</html>
