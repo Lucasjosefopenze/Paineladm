@@ -1023,6 +1023,32 @@
             .payments-grid { grid-template-columns: 1fr; }
             .message-preview { font-size: 13px; padding: 14px; }
         }
+        
+        /* BOTÃO DE DEBUG */
+        .debug-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, var(--warning), #D97706);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            z-index: 999;
+            box-shadow: var(--shadow-md);
+        }
+        
+        .debug-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
     </style>
 </head>
 <body>
@@ -1184,6 +1210,11 @@
             </div>
         </div>
     </div>
+    
+    <!-- Botão de Debug -->
+    <button class="debug-btn" onclick="debugData()">
+        <i class="fas fa-bug"></i> Debug
+    </button>
 
     <script>
         // CONFIGURAÇÃO DO FIREBASE
@@ -1211,19 +1242,27 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🚀 Painel Administrativo iniciando...');
             
-            // REGISTRAR QUE ESTAMOS ACESSANDO O PAINEL (NÃO O SITE)
+            // Registrar acesso ao painel (coleção separada)
             registerPanelAccess();
             
             // Carregar dados
             loadPayments();
             loadSiteVisits();
+            
+            // Atualizar visitas a cada 60 segundos
+            setInterval(() => {
+                loadSiteVisits();
+            }, 60000);
+            
+            // Atualizar pagamentos a cada 30 segundos
+            setInterval(() => {
+                loadPayments();
+            }, 30000);
         });
 
         // ==================== REGISTRAR ACESSO AO PAINEL ====================
         function registerPanelAccess() {
             try {
-                // Registrar que estamos acessando o PAINEL (não o site)
-                // Isso vai nos ajudar a diferenciar depois
                 const panelAccessData = {
                     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                     userAgent: navigator.userAgent,
@@ -1231,12 +1270,12 @@
                     source: 'admin_panel',
                     pageType: 'admin_dashboard',
                     isAdminPanel: true,
-                    site: 'admin_panel',
                     visitType: 'admin_access',
-                    action: 'admin_monitoring'
+                    dateString: new Date().toISOString().split('T')[0]
                 };
                 
-                db.collection('site_visits').add(panelAccessData)
+                // Coleção SEPARADA para acessos ao painel
+                db.collection('admin_panel_access').add(panelAccessData)
                     .then(() => {
                         console.log('✅ Acesso ao Painel Administrativo registrado');
                     })
@@ -1250,13 +1289,14 @@
 
         // ==================== CARREGAR VISITAS DO SITE ====================
         function loadSiteVisits() {
-            // Buscar APENAS visitas do SITE (não do painel)
-            // Filtro importante: isAdminPanel = false E source = 'payment_site'
-            db.collection('site_visits')
-                .where('isAdminPanel', '==', false)
-                .where('source', '==', 'payment_site')
+            console.log('📊 Carregando visitas do site de pagamento...');
+            
+            // Buscar APENAS da coleção de visitas do site de pagamento
+            db.collection('payment_site_visits')
                 .orderBy('timestamp', 'desc')
-                .onSnapshot((snapshot) => {
+                .limit(1000) // Limitar para performance
+                .get()
+                .then((snapshot) => {
                     allVisits = [];
                     snapshot.forEach((doc) => {
                         const data = doc.data();
@@ -1264,10 +1304,14 @@
                         allVisits.push(data);
                     });
                     
+                    console.log(`✅ ${allVisits.length} visitas do site carregadas`);
                     updateVisitStats();
-                }, (error) => {
-                    console.error('Erro ao carregar visitas do site:', error);
-                    // Mostrar valores padrão em caso de erro
+                })
+                .catch((error) => {
+                    console.error('❌ Erro ao carregar visitas:', error);
+                    showNotification('Erro ao carregar estatísticas de visitas', 'error');
+                    
+                    // Mostrar valores de fallback
                     document.getElementById('totalVisits').textContent = '0';
                     document.getElementById('todayVisits').textContent = '0';
                     document.getElementById('weekVisits').textContent = '0';
@@ -1277,6 +1321,7 @@
 
         function updateVisitStats() {
             if (allVisits.length === 0) {
+                console.log('📭 Nenhuma visita do site encontrada');
                 document.getElementById('totalVisits').textContent = '0';
                 document.getElementById('todayVisits').textContent = '0';
                 document.getElementById('weekVisits').textContent = '0';
@@ -1286,16 +1331,14 @@
             
             const totalVisits = allVisits.length;
             
-            // Calcular data de hoje
+            // Calcular datas
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
-            // Calcular data de 7 dias atrás
             const weekAgo = new Date();
             weekAgo.setDate(weekAgo.getDate() - 7);
             weekAgo.setHours(0, 0, 0, 0);
             
-            // Calcular data de 30 dias atrás
             const monthAgo = new Date();
             monthAgo.setDate(monthAgo.getDate() - 30);
             monthAgo.setHours(0, 0, 0, 0);
@@ -1305,8 +1348,17 @@
             let weekCount = 0;
             let monthCount = 0;
             
-            allVisits.forEach(visit => {
-                const visitDate = visit.timestamp?.toDate ? visit.timestamp.toDate() : new Date(visit.timestamp);
+            allVisits.forEach((visit) => {
+                let visitDate;
+                
+                // Extrair data corretamente
+                if (visit.timestamp && visit.timestamp.toDate) {
+                    visitDate = visit.timestamp.toDate();
+                } else if (visit.timestamp) {
+                    visitDate = new Date(visit.timestamp);
+                } else {
+                    return; // Pular se não tiver timestamp
+                }
                 
                 // Visitas hoje
                 if (visitDate >= today) {
@@ -1324,13 +1376,18 @@
                 }
             });
             
-            // Atualizar estatísticas de visitas
+            // Atualizar estatísticas
             document.getElementById('totalVisits').textContent = totalVisits;
             document.getElementById('todayVisits').textContent = todayCount;
             document.getElementById('weekVisits').textContent = weekCount;
             document.getElementById('monthVisits').textContent = monthCount;
             
-            console.log(`📊 Estatísticas de visitas: Total=${totalVisits}, Hoje=${todayCount}, 7dias=${weekCount}, 30dias=${monthCount}`);
+            console.log('📊 Estatísticas atualizadas:', {
+                total: totalVisits,
+                hoje: todayCount,
+                semana: weekCount,
+                mes: monthCount
+            });
         }
 
         // ==================== CARREGAR PAGAMENTOS ====================
@@ -1742,6 +1799,7 @@
 
         // ==================== UTILIDADES ====================
         function refreshData() {
+            console.log('🔄 Atualizando dados...');
             loadPayments();
             loadSiteVisits();
             showNotification('🔄 Dados atualizados com sucesso!', 'info');
@@ -1793,6 +1851,42 @@
                     notification.parentNode.removeChild(notification);
                 }
             }, 3000);
+        }
+        
+        // ==================== DEBUG ====================
+        function debugData() {
+            console.log('🔧 DEBUG - VISITAS DO SITE:');
+            console.log('Total de visitas:', allVisits.length);
+            
+            if (allVisits.length > 0) {
+                console.log('Primeiras 5 visitas:');
+                allVisits.slice(0, 5).forEach((visit, i) => {
+                    console.log(`  ${i + 1}.`, {
+                        id: visit.id,
+                        timestamp: visit.timestamp ? 
+                            (visit.timestamp.toDate ? 
+                             visit.timestamp.toDate().toLocaleString() : 
+                             new Date(visit.timestamp).toLocaleString()) : 
+                            'N/A',
+                        source: visit.source || 'N/A',
+                        isAdminPanel: visit.isAdminPanel || false,
+                        pageType: visit.pageType || 'N/A'
+                    });
+                });
+            }
+            
+            console.log('🔧 DEBUG - PAGAMENTOS:');
+            console.log('Total de pagamentos:', allPayments.length);
+            console.log('Pendentes:', allPayments.filter(p => p.status === 'pending_verification').length);
+            console.log('Verificados:', allPayments.filter(p => p.status === 'verified').length);
+            console.log('Rejeitados:', allPayments.filter(p => p.status === 'rejected').length);
+            
+            // Verificar coleções no Firebase
+            db.collection('payment_site_visits').count().get().then((snapshot) => {
+                console.log(`📊 Total de visitas no Firebase: ${snapshot.data().count}`);
+            });
+            
+            showNotification('🔧 Dados de debug exibidos no console', 'info');
         }
     </script>
 </body>
